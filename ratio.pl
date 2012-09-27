@@ -1,23 +1,21 @@
 #!/usr/bin/perl -w
 
+# Configuration
+# -----
+my $mrtgconfig = "/usr/local/etc/mrtg/mrtg-rrd.cfg";
+my $dbname = "/home/mclark/rrdreport/manage.db";
+my @interface_types = qw(transit);
+
+# Load necessary perl modules
+# --
 use Getopt::Long;
 use MRTG_lib;
 use RRDs;
 use Statistics::Descriptive;
 use Time::Local;
+use DBI;
 
 my $VERSION = "0.1";
-
-# Configuration
-# -----
-my $mrtgconfig = "/usr/local/etc/mrtg/mrtg.cfg";
-
-# Initialize Variables
-# -----
-my %transit = (
-	level3 => "185",
-	savvis => "183",
-);
 
 # Usage and Help
 # -----
@@ -36,7 +34,7 @@ sub usage {
 
 my %opt = ();
 GetOptions(\%opt,
-	'debug|d', 'month|m=s', 'year|y=s', 'lastmonth|l', 'ytd', 'help|h', 'verbose|v', 'version'
+  'debug|d', 'month|m=s', 'year|y=s', 'lastmonth|l', 'ytd', 'help|h', 'verbose|v', 'version'
 	) or exit(1);
 usage if $opt{help};
 
@@ -63,25 +61,24 @@ if (defined $opt{lastmonth}) {
 	}
 }
 
-my @months = qw(31 28 31 30 31 30 31 31 30 31 30 31);
-my @month_name = qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec);
+my $starttime = timegm("0","0","0","1",$mon,$year);
 
-$months[1]++ if ($year + 1900) % 4 == 0;
+# Create a formatted date that SQL will understand
+# --
+$y = $year + 1900;
+$m = sprintf ('%02d', $mon + 1);
+$d = sprintf ('%02d', 1);
 
-if (defined $opt{ytd}) {
-	print "YTD is set\n" if DEBUG;
-	$starttime = timegm("0","0","0","1","0",$year);
+print "$y-$m-$d\n" if $DEBUG;
+
+if (defined $opt{month} || defined $opt{lastmonth}) {
+	if ($mon == 11) {
+		$endtime = timegm("0","0","0","1","0",++$year);
+	} else {
+		$endtime = timegm("0","0","0","1",++$mon,$year);
+	}
 } else {
-	print "YTD is not set\n" if DEBUG;
-	$starttime = timegm("0","0","0","1",$mon,$year);
-}
-
-#my $starttime = timegm("0","0","0","1",$mon,$year);
-
-if ($mon == 11) {
-	$endtime = timegm("0","0","0","1","0",++$year);
-} else {
-	$endtime = timegm("0","0","0","1",++$mon,$year);
+	$endtime = timegm("0",$min,$hour,$mday,$mon,$year);
 }
 
 # Override defaults
@@ -93,18 +90,44 @@ my $configfile = $opt{config} ? defined $opt{config} : $mrtgconfig;
 #exit unless -r "$configfile";
 #readcfg($configfile, \@target_names, \%globalcfg, \%targetcfg);
 
+# Connect to the Database
+# -----------------------
+my $dbh = DBI->connect("DBI:SQLite:dbname=$dbname", "", "") or die "Couldn't connect to database: " . DBI->errstr;
+
+# SQL Queries
+# -----------
+my $get_interfaces = $dbh->prepare(q(
+	select *
+	from interface
+	where type = ? and active = 't' and start_date < ?
+	order by name
+	)) || "Couldn't prepare statement: " . $dbh->errstr;
+
 print "\nCurrent Date/Time is: ", scalar gmtime(time());
-print "\n Ratio report from: ", scalar localtime($starttime), " to: ", scalar localtime($endtime), "\n\n";
 
-foreach $key ( sort keys %transit) {
+foreach (@interface_types) {
+  
+  print "\n Ratio report from: ", scalar localtime($starttime), " to: ", scalar localtime($endtime), "\n\n";
+  print "$starttime $endtime\n" if $VERBOSE;
 
-	print "interface: $key\n" if $DEBUG;
+  # printf "%20s %10s %10s %10s %10s %10s %10s\n", Interface, "95th", "GB", "GB/Mb", "Cost", "\$/Mbps", "\$/GB";
 
-	my ($inbound,$outbound) = calcRatio($transit{$key},$starttime,$endtime);
-	$total_in += $inbound;
-	$total_out += $outbound;
+	$get_interfaces->execute($_, "$y-$m-$d");
 
-	printf "%20s: In: %8s Out: %8s GByte\n", $key, scaleBytes($inbound), scaleBytes($outbound);
+  while (my ($id, $name, $type, $device, $interface, $ccn_rate, $cir, $cir_rate, $overage_rate) = $get_interfaces->fetchrow_array) {
+    
+    $int = $device . "_" . $interface;
+		print "interface: $int\n" if $DEBUG;
+		
+		my ($inbound,$outbound) = calcRatio($device,$int,$starttime,$endtime);
+		print "in = $inbound \t out = $outbound\n" if $DEBUG;
+		
+		$total_in += $inbound;
+  	$total_out += $outbound;
+  	
+  	printf "%20s: In: %8s Out: %8s GByte\n", $name, scaleBytes($inbound), scaleBytes($outbound);
+  	
+	}
 }
 
 print "\n";
@@ -113,6 +136,7 @@ printf "%20s In: %.2f Out: %.2f\n", "Ratio", $total_in / ($total_in + $total_out
 
 # ----------
 sub calcRatio {
+	my $device = shift;
 	my $interface = shift;
 	my $starttime = shift;
 	my $lasttime = shift;
@@ -121,7 +145,7 @@ sub calcRatio {
 	# --
 	$rrdstart = $starttime - 300;
 
-	my $rrd = '/usr/local/mrtg/device/device_' . $interface . '.rrd';
+	my $rrd = '/usr/local/mrtg-rrd/' . $device . '/' . $interface . '.rrd';
 
 #	print "$rrd $starttime $lasttime\n" if $DEBUG;
 

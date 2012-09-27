@@ -2,8 +2,8 @@
 
 # Default Configuration
 # -----
-my $mrtgconfig = "/usr/local/etc/mrtg/mrtg.cfg";
-my $dbname = "/home/mclark/report/report.db";
+my $mrtgconfig = "/usr/local/etc/mrtg/mrtg-rrd.cfg";
+my $dbname = "/home/mclark/rrdreport/manage.db";
 my @interface_types = qw(transit);
 
 # Load necessary perl modules
@@ -63,6 +63,14 @@ if (defined $opt{lastmonth}) {
 
 my $starttime = timegm("0","0","0","1",$mon,$year);
 
+# Create a formatted date that SQL will understand
+# --
+$y = $year + 1900;
+$m = sprintf ('%02d', $mon + 1);
+$d = sprintf ('%02d', 1);
+
+print "$y-$m-$d\n" if $DEBUG;
+
 if (defined $opt{month} || defined $opt{lastmonth}) {
 	if ($mon == 11) {
 		$endtime = timegm("0","0","0","1","0",++$year);
@@ -90,8 +98,8 @@ my $dbh = DBI->connect("DBI:SQLite:dbname=$dbname", "", "") or die "Couldn't con
 # -----------
 my $get_interfaces = $dbh->prepare(q(
 	select *
-	from interfaces
-	where type = ? and active = 1
+	from interface
+	where type = ? and active = 't' and start_date < ?
 	order by name
 	)) || "Couldn't prepare statement: " . $dbh->errstr;
 
@@ -102,9 +110,9 @@ foreach (@interface_types) {
 	print "\n $_ report from: ", scalar localtime($starttime), " to: ", scalar localtime($endtime), "\n\n";
 	printf "%30s: %8s %8s %8s \n", Heading, Usage, Overage, Bill;
 
-	$get_interfaces->execute($_);
+	$get_interfaces->execute($_, "$y-$m-$d");
 
-	while (my ($name, $type, $device, $interface, $start_date, $end_date, $cir, $cir_rate, $overage_rate) = $get_interfaces->fetchrow_array) {
+	while (my ($id, $name, $type, $device, $interface, $ccn_rate, $cir, $cir_rate, $overage_rate) = $get_interfaces->fetchrow_array) {
 
 		$int = $device . "_" . $interface;
 		print "interface: $int\n" if $DEBUG;
@@ -119,7 +127,7 @@ foreach (@interface_types) {
 		$overage = $true > $cir ? $true - $cir : 0;
 		print "true: $true \t cir: $cir \t overage: $overage\n" if $DEBUG;
 
-		printf "%30s: %8s %8s \$%8.2f %15s_%3s\n", $name, scaleBits($true), scaleBits($overage), scaleBits($overage) * $overage_rate, $device, $interface;
+		printf "%30s: %8s %8s \$%8.2f\n", $name, scaleBits($true), scaleBits($overage), scaleBits($overage) * $overage_rate;
 	}
 
 	$get_interfaces->finish;
@@ -141,7 +149,7 @@ sub calc95 {
 	# --
 	$rrdstart = $starttime - 300;
 
-	my $rrd = '/usr/local/mrtg/' . $device . '/' . $interface . '.rrd';
+	my $rrd = '/usr/local/mrtg-rrd/' . $device . '/' . $interface . '.rrd';
 
 #	print "$rrd $starttime $lasttime\n" if $DEBUG;
 
