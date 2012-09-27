@@ -1,0 +1,13 @@
+CREATE TABLE interface (
+  id integer primary key,
+  name varchar(200),
+  type varchar(20),
+  device varchar(200),
+  interface integer,
+  ccn_rate integer,
+  cir integer,
+  cir_rate integer,
+  overage_rate integer,
+  start_date date,
+  active boolean
+);

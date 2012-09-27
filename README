@@ -1,0 +1,34 @@
+    ------------------------------------------
+    rrdreport - an RRD reporting tool for MRTG
+    by Max Clark <max@clarksys.com>
+    ------------------------------------------
+
+rrdreport is composed of several perl scripts that read data from a RRD 
+database and generates a report.
+
+Get it from:
+
+	https://github.com/maxclark/rrdreport
+	=====================================
+
+
+Required Modules
+----------------
+
+- DBI and DBD::Pg or DBD::MySQL
+  -> get it from CPAN
+
+Note that several Linux distributions will already have these modules as RPMs.
+
+
+Usage
+-----
+
+rrdreport is made of:
+
+
+License
+-------
+
+rrdreport is released under the GPL license. See the file COPYING included in 
+the distribution for details.
